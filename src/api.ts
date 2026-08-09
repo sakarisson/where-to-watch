@@ -1,15 +1,92 @@
 import { COUNTRIES } from './countries';
 
-const API_URL = 'https://apis.justwatch.com/graphql';
+// JustWatch only returns CORS headers to *.justwatch.com, to localhost, and to
+// the opaque "null" origin, so a page served from GitHub Pages cannot call the
+// API directly. A sandboxed iframe (no allow-same-origin) has that null origin,
+// so requests are relayed through public/jw-proxy.html over postMessage.
+const PROXY_PATH = 'jw-proxy.html';
+const PROXY_LOAD_TIMEOUT_MS = 15_000;
+
+let proxy: Promise<Window> | null = null;
+
+function loadProxy(): Promise<Window> {
+  return new Promise((resolve, reject) => {
+    const frame = document.createElement('iframe');
+    frame.hidden = true;
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.src = new URL(PROXY_PATH, document.baseURI).href;
+
+    const timer = setTimeout(() => {
+      done();
+      frame.remove();
+      reject(new Error('Timed out loading the JustWatch proxy'));
+    }, PROXY_LOAD_TIMEOUT_MS);
+
+    function done() {
+      clearTimeout(timer);
+      removeEventListener('message', onReady);
+    }
+
+    function onReady(event: MessageEvent) {
+      if (event.source !== frame.contentWindow || !event.data?.ready) return;
+      done();
+      resolve(frame.contentWindow as Window);
+    }
+
+    // Listen before appending, so a fast-loading frame cannot beat us to it.
+    addEventListener('message', onReady);
+    document.body.append(frame);
+  });
+}
+
+function proxyWindow(): Promise<Window> {
+  proxy ??= loadProxy().catch((err: unknown) => {
+    proxy = null; // let the next search retry rather than caching the failure
+    throw err;
+  });
+  return proxy;
+}
+
+interface ProxyReply {
+  id: number;
+  status?: number;
+  text?: string;
+  error?: string;
+}
+
+interface GqlResponse<T> {
+  data: T;
+  errors?: { message: string }[];
+}
+
+let lastRequestId = 0;
 
 async function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
+  const frame = await proxyWindow();
+  const id = ++lastRequestId;
+
+  const json = await new Promise<GqlResponse<T>>((resolve, reject) => {
+    function onMessage(event: MessageEvent<ProxyReply>) {
+      if (event.source !== frame || event.data?.id !== id) return;
+      removeEventListener('message', onMessage);
+
+      const { status, text, error } = event.data;
+      if (error) return reject(new Error(error));
+      if (status === undefined || status < 200 || status >= 300) {
+        return reject(new Error(`JustWatch API returned ${status}`));
+      }
+      try {
+        resolve(JSON.parse(text ?? '') as GqlResponse<T>);
+      } catch {
+        reject(new Error('JustWatch returned a malformed response'));
+      }
+    }
+
+    addEventListener('message', onMessage);
+    // The frame's origin is opaque, so "*" is the only possible target.
+    frame.postMessage({ id, body: JSON.stringify({ query, variables }) }, '*');
   });
-  if (!res.ok) throw new Error(`JustWatch API returned ${res.status}`);
-  const json = await res.json();
+
   if (json.errors?.length) throw new Error(json.errors[0].message);
   return json.data;
 }

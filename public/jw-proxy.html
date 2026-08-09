@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>JustWatch request proxy</title>
+  </head>
+  <body>
+    <script>
+      // Loaded in a sandboxed iframe so this document has the opaque "null"
+      // origin, which is one of the few origins JustWatch still sends CORS
+      // headers to. See src/api.ts for why the app cannot call the API directly.
+      const API_URL = 'https://apis.justwatch.com/graphql';
+
+      // The parent's origin is not knowable from inside the sandbox, so replies
+      // go to "*". Only public streaming-availability data passes through here.
+      const TARGET = '*';
+
+      addEventListener('message', async (event) => {
+        const { id, body } = event.data ?? {};
+        if (typeof id !== 'number' || typeof body !== 'string') return;
+
+        try {
+          const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+          });
+          event.source.postMessage(
+            { id, status: res.status, text: await res.text() },
+            TARGET,
+          );
+        } catch (err) {
+          event.source.postMessage({ id, error: String(err) }, TARGET);
+        }
+      });
+
+      parent.postMessage({ ready: true }, TARGET);
+    </script>
+  </body>
+</html>
