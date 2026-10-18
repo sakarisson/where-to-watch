@@ -132,6 +132,13 @@ interface SearchResponse {
   };
 }
 
+function posterUrl(path: string | null): string | null {
+  return path
+    ? 'https://images.justwatch.com' +
+        path.replace('{profile}', 's166').replace('{format}', 'webp')
+    : null;
+}
+
 export async function searchTitles(q: string): Promise<SearchResult[]> {
   const data = await gql<SearchResponse>(SEARCH_QUERY, { q });
   return data.popularTitles.edges.map(({ node }) => ({
@@ -139,18 +146,28 @@ export async function searchTitles(q: string): Promise<SearchResult[]> {
     title: node.content.title,
     year: node.content.originalReleaseYear,
     type: node.objectType,
-    posterUrl: node.content.posterUrl
-      ? 'https://images.justwatch.com' +
-        node.content.posterUrl.replace('{profile}', 's166').replace('{format}', 'webp')
-      : null,
+    posterUrl: posterUrl(node.content.posterUrl),
   }));
 }
 
-// One aliased offers field per country, so a single request covers all of them.
+/** JustWatch title ids look like tm12345 (movie) or ts12345 (show). */
+export function isTitleId(id: string): boolean {
+  return /^t[ms]\d+$/.test(id);
+}
+
+// One aliased offers field per country, so a single request covers all of
+// them. The title details come along too, so a deep link needs one request.
 const OFFERS_QUERY = `
 query Offers($id: ID!) {
   node(id: $id) {
+    id
     ... on MovieOrShow {
+      objectType
+      content(country: US, language: "en") {
+        title
+        originalReleaseYear
+        posterUrl
+      }
       ${COUNTRIES.map(
         (c) =>
           `${c.code}: offers(country: ${c.code}, platform: WEB, filter: { monetizationTypes: [FLATRATE] }) { standardWebURL package { clearName } }`,
@@ -159,11 +176,16 @@ query Offers($id: ID!) {
   }
 }`;
 
+type Offer = { standardWebURL: string | null; package: { clearName: string } };
+
 interface OffersResponse {
-  node: Record<
-    string,
-    { standardWebURL: string | null; package: { clearName: string } }[]
-  > | null;
+  node:
+    | ({
+        id: string;
+        objectType: 'MOVIE' | 'SHOW';
+        content: SearchResponse['popularTitles']['edges'][number]['node']['content'];
+      } & Record<string, Offer[] | undefined>)
+    | null;
 }
 
 export interface CountryOffer {
@@ -171,13 +193,20 @@ export interface CountryOffer {
   url: string | null;
 }
 
-/** Map of service name -> countries where the title streams on it, with offer links. */
-export async function fetchAvailability(id: string): Promise<Map<string, CountryOffer[]>> {
-  const data = await gql<OffersResponse>(OFFERS_QUERY, { id });
+export interface TitleAvailability {
+  title: SearchResult;
+  /** Service name -> countries where the title streams on it, with offer links. */
+  availability: Map<string, CountryOffer[]>;
+}
+
+export async function fetchTitle(id: string): Promise<TitleAvailability> {
+  const { node } = await gql<OffersResponse>(OFFERS_QUERY, { id });
+  if (!node?.content) throw new Error("Couldn't find that title");
+
   const byService = new Map<string, CountryOffer[]>();
   for (const { code } of COUNTRIES) {
     const urlByService = new Map<string, string | null>();
-    for (const offer of data.node?.[code] ?? []) {
+    for (const offer of node[code] ?? []) {
       const service = offer.package.clearName.trim();
       if (!urlByService.get(service)) {
         urlByService.set(service, offer.standardWebURL);
@@ -189,9 +218,19 @@ export async function fetchAvailability(id: string): Promise<Map<string, Country
       byService.set(service, list);
     }
   }
-  return new Map(
-    [...byService.entries()].sort((a, b) => b[1].length - a[1].length),
-  );
+
+  return {
+    title: {
+      id: node.id,
+      title: node.content.title,
+      year: node.content.originalReleaseYear,
+      type: node.objectType,
+      posterUrl: posterUrl(node.content.posterUrl),
+    },
+    availability: new Map(
+      [...byService.entries()].sort((a, b) => b[1].length - a[1].length),
+    ),
+  };
 }
 
 const SERVICES_QUERY = `

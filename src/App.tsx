@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  fetchAvailability,
+  fetchTitle,
+  isTitleId,
   searchTitles,
   type CountryOffer,
   type SearchResult,
@@ -56,11 +57,20 @@ function flag(code: string): string {
   );
 }
 
+function queryFromUrl(): string {
+  return new URLSearchParams(window.location.search).get('q') ?? '';
+}
+
+function titleIdFromUrl(): string | null {
+  const id = new URLSearchParams(window.location.search).get('title');
+  return id && isTitleId(id) ? id : null;
+}
+
 export default function App() {
-  const [query, setQuery] = useState(
-    () => new URLSearchParams(window.location.search).get('q') ?? '',
-  );
+  const [query, setQuery] = useState(queryFromUrl);
   const [results, setResults] = useState<SearchResult[]>([]);
+  // ?title= in the URL is the source of truth for which title is shown.
+  const [titleId, setTitleId] = useState(titleIdFromUrl);
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [availability, setAvailability] = useState<Map<string, CountryOffer[]> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,20 +135,55 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  async function pick(title: SearchResult) {
+  // Back/forward: re-read the URL.
+  useEffect(() => {
+    function onPopState() {
+      setQuery(queryFromUrl());
+      setTitleId(titleIdFromUrl());
+    }
+    addEventListener('popstate', onPopState);
+    return () => removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    // Keep the header if we already know the title (picked from search).
+    setSelected((s) => (s?.id === titleId ? s : null));
+    setAvailability(null);
+    setError(null);
+    if (!titleId) {
+      setLoading(false);
+      return;
+    }
+    let live = true;
+    setLoading(true);
+    fetchTitle(titleId)
+      .then((r) => {
+        if (!live) return;
+        setSelected(r.title);
+        setAvailability(r.availability);
+      })
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Request failed'))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [titleId]);
+
+  useEffect(() => {
+    document.title = selected ? `${selected.title} · Where to Watch` : 'Where to Watch';
+  }, [selected]);
+
+  function pick(title: SearchResult) {
     setSelected(title);
     setResults([]);
     setQuery('');
-    setAvailability(null);
-    setError(null);
-    setLoading(true);
-    try {
-      setAvailability(await fetchAvailability(title.id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed');
-    } finally {
-      setLoading(false);
-    }
+    if (title.id === titleId) return;
+    // A new history entry, so Back returns to the search.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('q');
+    url.searchParams.set('title', title.id);
+    window.history.pushState(null, '', url);
+    setTitleId(title.id);
   }
 
   const countryCount = availability
@@ -249,10 +294,10 @@ export default function App() {
         </label>
       </div>
 
-      {selected && (
+      {titleId && (
         <section className="departures">
           <div className="departures-head">
-            <h2>{selected.title}</h2>
+            <h2>{selected?.title ?? '…'}</h2>
             {availability && (
               <span className="summary">
                 {countryCount > 0
@@ -339,7 +384,7 @@ export default function App() {
         </section>
       )}
 
-      {!selected && (
+      {!titleId && (
         <p className="hint">
           Find out which country to point your VPN at.
           <br />
