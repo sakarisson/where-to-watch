@@ -157,6 +157,19 @@ export default function App() {
   const servicesAtHome = services
     .filter(([, offers]) => offers.some((o) => o.code === home))
     .map(([s]) => s);
+  const mineAtHome = servicesAtHome.filter((s) => mine.has(s));
+
+  // "No VPN needed" only holds if it's on a service you actually have.
+  function homeNote(): string {
+    if (!servicesAtHome.length) return `Not streaming in ${homeName} — you'll need a VPN.`;
+    if (mineAtHome.length) {
+      return `No VPN needed — streaming in ${homeName} on ${mineAtHome.join(', ')}.`;
+    }
+    const where = `Streaming in ${homeName} on ${servicesAtHome.join(', ')}`;
+    return myServices.length
+      ? `${where}, but not on any of your services.`
+      : `${where}. Star the services you have to see whether you need a VPN.`;
+  }
 
   return (
     <div className="board">
@@ -237,11 +250,8 @@ export default function App() {
             ) : (
               <>
                 {homeName && (
-                  <p className={servicesAtHome.length ? 'here-note ok' : 'here-note'}>
-                    {flag(home)}{' '}
-                    {servicesAtHome.length
-                      ? `No VPN needed — streaming in ${homeName} on ${servicesAtHome.join(', ')}.`
-                      : `Not streaming in ${homeName} — you'll need a VPN.`}
+                  <p className={mineAtHome.length ? 'here-note ok' : 'here-note'}>
+                    {flag(home)} {homeNote()}
                   </p>
                 )}
                 {myServices.length > 0 && !onMine && (
