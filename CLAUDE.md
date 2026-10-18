@@ -31,6 +31,7 @@ the deployed build — test with `npm run preview` or the real site, not just de
 - `src/api.ts` — the only data layer: title search, plus one GraphQL query that fetches offers for every country at once using per-country field aliases. Only `gql()` knows about the proxy.
 - `src/countries.ts` — generated list of all JustWatch-supported countries (from `apis.justwatch.com/content/locales/state`); regenerate from that endpoint rather than editing by hand.
 - `src/App.tsx` — the UI. The user's chosen services live in localStorage and are sorted to the top of results.
+- `src/timezones.ts` — generated timezone → country table (from tzdata `zone.tab`), used to guess the user's home country without an IP lookup, which would report the VPN's country.
 - `src/ServicePicker.tsx` — the "My services" picker; lazily fetches every country's service list (`fetchServices`) on first open.
 
 The API is unofficial and may change without notice. If queries break, check https://github.com/Electronic-Mango/simple-justwatch-python-api for the current query shapes.

@@ -7,8 +7,37 @@ import {
 } from './api';
 import { COUNTRIES } from './countries';
 import { ServicePicker } from './ServicePicker';
+import { TIMEZONE_COUNTRY } from './timezones';
 
 const COUNTRY_NAME = new Map(COUNTRIES.map((c) => [c.code, c.name]));
+
+const HOME_KEY = 'where-to-watch:home-country';
+
+/** Best guess at where the user physically is, or '' if unknown/unsupported. */
+function detectHome(): string {
+  try {
+    const fromTz = TIMEZONE_COUNTRY[Intl.DateTimeFormat().resolvedOptions().timeZone];
+    if (fromTz) return fromTz;
+    for (const lang of navigator.languages ?? []) {
+      const region = new Intl.Locale(lang).region;
+      if (region && COUNTRY_NAME.has(region)) return region;
+    }
+  } catch {
+    // fall through
+  }
+  return '';
+}
+
+/** 'auto', or a country code the user picked explicitly. */
+function loadHomeSetting(): string {
+  try {
+    const v = localStorage.getItem(HOME_KEY);
+    if (v && COUNTRY_NAME.has(v)) return v;
+  } catch {
+    // storage unavailable
+  }
+  return 'auto';
+}
 
 const MY_SERVICES_KEY = 'where-to-watch:my-services';
 
@@ -47,6 +76,21 @@ export default function App() {
       // storage unavailable (private mode etc.); the choice just won't persist
     }
   }, [myServices]);
+
+  const detectedHome = useMemo(detectHome, []);
+  const [homeSetting, setHomeSetting] = useState(loadHomeSetting);
+  const home = homeSetting === 'auto' ? detectedHome : homeSetting;
+
+  function changeHome(value: string) {
+    setHomeSetting(value);
+    try {
+      // Only an explicit choice is stored, so "auto" keeps following you around.
+      if (value === 'auto') localStorage.removeItem(HOME_KEY);
+      else localStorage.setItem(HOME_KEY, value);
+    } catch {
+      // storage unavailable
+    }
+  }
 
   function toggleService(service: string) {
     setMyServices((prev) =>
@@ -109,6 +153,10 @@ export default function App() {
       )
     : [];
   const onMine = services.some(([s]) => mine.has(s));
+  const homeName = COUNTRY_NAME.get(home);
+  const servicesAtHome = services
+    .filter(([, offers]) => offers.some((o) => o.code === home))
+    .map(([s]) => s);
 
   return (
     <div className="board">
@@ -149,6 +197,22 @@ export default function App() {
 
       <ServicePicker mine={myServices} onChange={setMyServices} />
 
+      <div className="here-bar">
+        <label>
+          <span className="my-services-label">I'm in</span>
+          <select value={homeSetting} onChange={(e) => changeHome(e.target.value)}>
+            <option value="auto">
+              {detectedHome ? `${COUNTRY_NAME.get(detectedHome)} (detected)` : 'Unknown — pick one'}
+            </option>
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       {selected && (
         <section className="departures">
           <div className="departures-head">
@@ -172,6 +236,14 @@ export default function App() {
               </p>
             ) : (
               <>
+                {homeName && (
+                  <p className={servicesAtHome.length ? 'here-note ok' : 'here-note'}>
+                    {flag(home)}{' '}
+                    {servicesAtHome.length
+                      ? `No VPN needed — streaming in ${homeName} on ${servicesAtHome.join(', ')}.`
+                      : `Not streaming in ${homeName} — you'll need a VPN.`}
+                  </p>
+                )}
                 {myServices.length > 0 && !onMine && (
                   <p className="status">Not on any of your services — other options below.</p>
                 )}
@@ -201,24 +273,30 @@ export default function App() {
                         <span className="service-count">{codes.length}</span>
                       </div>
                       <div className="countries">
-                        {codes.map(({ code, url }) =>
-                          url ? (
-                            <a
-                              key={code}
-                              className="country"
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={`${COUNTRY_NAME.get(code)} — open on ${service}`}
-                            >
-                              {flag(code)} {code}
-                            </a>
-                          ) : (
-                            <span key={code} className="country" title={COUNTRY_NAME.get(code)}>
-                              {flag(code)} {code}
-                            </span>
-                          ),
-                        )}
+                        {[...codes]
+                          .sort((a, b) => Number(b.code === home) - Number(a.code === home))
+                          .map(({ code, url }) =>
+                            url ? (
+                              <a
+                                key={code}
+                                className={code === home ? 'country here' : 'country'}
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={`${COUNTRY_NAME.get(code)} — open on ${service}`}
+                              >
+                                {flag(code)} {code}
+                              </a>
+                            ) : (
+                              <span
+                                key={code}
+                                className={code === home ? 'country here' : 'country'}
+                                title={COUNTRY_NAME.get(code)}
+                              >
+                                {flag(code)} {code}
+                              </span>
+                            ),
+                          )}
                       </div>
                     </li>
                   ))}
