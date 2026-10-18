@@ -398,6 +398,18 @@ a.country {
   padding-left: 0.75rem;
 }
 
-.mine-mark {
+.mine-toggle {
+  background: none;
+  border: 0;
+  padding: 0 0.4rem 0 0;
+  font: inherit;
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.mine-toggle:hover,
+.mine-toggle[aria-pressed='true'] {
   color: var(--amber);
+  opacity: 1;
 }

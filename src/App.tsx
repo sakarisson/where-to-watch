@@ -48,6 +48,12 @@ export default function App() {
     }
   }, [myServices]);
 
+  function toggleService(service: string) {
+    setMyServices((prev) =>
+      prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service],
+    );
+  }
+
   // Mirror the search box into ?q= so a search can be bookmarked or shared.
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -178,9 +184,18 @@ export default function App() {
                     >
                       <div className="service-name">
                         <span>
-                          {mine.has(service) && (
-                            <span className="mine-mark" title="One of your services">★ </span>
-                          )}
+                          <button
+                            className="mine-toggle"
+                            onClick={() => toggleService(service)}
+                            aria-pressed={mine.has(service)}
+                            title={
+                              mine.has(service)
+                                ? `Remove ${service} from your services`
+                                : `I have ${service}`
+                            }
+                          >
+                            {mine.has(service) ? '★' : '☆'}
+                          </button>
                           {service}
                         </span>
                         <span className="service-count">{codes.length}</span>
