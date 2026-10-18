@@ -178,7 +178,7 @@ export async function fetchAvailability(id: string): Promise<Map<string, Country
   for (const { code } of COUNTRIES) {
     const urlByService = new Map<string, string | null>();
     for (const offer of data.node?.[code] ?? []) {
-      const service = offer.package.clearName;
+      const service = offer.package.clearName.trim();
       if (!urlByService.get(service)) {
         urlByService.set(service, offer.standardWebURL);
       }
@@ -192,4 +192,28 @@ export async function fetchAvailability(id: string): Promise<Map<string, Country
   return new Map(
     [...byService.entries()].sort((a, b) => b[1].length - a[1].length),
   );
+}
+
+const SERVICES_QUERY = `
+query Services {
+  ${COUNTRIES.map(
+    (c) =>
+      `${c.code}: packages(country: ${c.code}, platform: WEB, monetizationTypes: [FLATRATE]) { clearName }`,
+  ).join('\n  ')}
+}`;
+
+/** Every subscription service JustWatch knows of, most popular first. */
+export async function fetchServices(): Promise<string[]> {
+  const data = await gql<Record<string, { clearName: string }[]>>(SERVICES_QUERY, {});
+  // Each country's list comes in popularity order, so early positions weigh
+  // more. Counting countries alone would rank niche services that happen to be
+  // available everywhere above Netflix.
+  const score = new Map<string, number>();
+  for (const list of Object.values(data)) {
+    list.forEach(({ clearName }, i) => {
+      const name = clearName.trim();
+      score.set(name, (score.get(name) ?? 0) + 1 / (i + 1));
+    });
+  }
+  return [...score.keys()].sort((a, b) => score.get(b)! - score.get(a)!);
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchAvailability,
   searchTitles,
@@ -6,8 +6,20 @@ import {
   type SearchResult,
 } from './api';
 import { COUNTRIES } from './countries';
+import { ServicePicker } from './ServicePicker';
 
 const COUNTRY_NAME = new Map(COUNTRIES.map((c) => [c.code, c.name]));
+
+const MY_SERVICES_KEY = 'where-to-watch:my-services';
+
+function loadMyServices(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(MY_SERVICES_KEY) ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 function flag(code: string): string {
   return String.fromCodePoint(
@@ -16,13 +28,35 @@ function flag(code: string): string {
 }
 
 export default function App() {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(
+    () => new URLSearchParams(window.location.search).get('q') ?? '',
+  );
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [availability, setAvailability] = useState<Map<string, CountryOffer[]> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchSeq = useRef(0);
+  const [myServices, setMyServices] = useState(loadMyServices);
+  const mine = useMemo(() => new Set(myServices), [myServices]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MY_SERVICES_KEY, JSON.stringify(myServices));
+    } catch {
+      // storage unavailable (private mode etc.); the choice just won't persist
+    }
+  }, [myServices]);
+
+  // Mirror the search box into ?q= so a search can be bookmarked or shared.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (query) url.searchParams.set('q', query);
+    else url.searchParams.delete('q');
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url);
+    }
+  }, [query]);
 
   useEffect(() => {
     const q = query.trim();
@@ -61,6 +95,15 @@ export default function App() {
     ? new Set([...availability.values()].flat().map((o) => o.code)).size
     : 0;
 
+  // Your services first; sort is stable, so each group keeps its
+  // most-countries-first order.
+  const services = availability
+    ? [...availability.entries()].sort(
+        ([a], [b]) => Number(mine.has(b)) - Number(mine.has(a)),
+      )
+    : [];
+  const onMine = services.some(([s]) => mine.has(s));
+
   return (
     <div className="board">
       <header>
@@ -98,6 +141,8 @@ export default function App() {
         )}
       </div>
 
+      <ServicePicker mine={myServices} onChange={setMyServices} />
+
       {selected && (
         <section className="departures">
           <div className="departures-head">
@@ -120,36 +165,50 @@ export default function App() {
                 No subscription streams found in any country. Sorry.
               </p>
             ) : (
-              <ol className="services">
-                {[...availability.entries()].map(([service, codes], i) => (
-                  <li key={service} style={{ animationDelay: `${i * 70}ms` }}>
-                    <div className="service-name">
-                      {service}
-                      <span className="service-count">{codes.length}</span>
-                    </div>
-                    <div className="countries">
-                      {codes.map(({ code, url }) =>
-                        url ? (
-                          <a
-                            key={code}
-                            className="country"
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={`${COUNTRY_NAME.get(code)} — open on ${service}`}
-                          >
-                            {flag(code)} {code}
-                          </a>
-                        ) : (
-                          <span key={code} className="country" title={COUNTRY_NAME.get(code)}>
-                            {flag(code)} {code}
-                          </span>
-                        ),
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ol>
+              <>
+                {myServices.length > 0 && !onMine && (
+                  <p className="status">Not on any of your services — other options below.</p>
+                )}
+                <ol className="services">
+                  {services.map(([service, codes], i) => (
+                    <li
+                      key={service}
+                      className={mine.has(service) ? 'mine' : undefined}
+                      style={{ animationDelay: `${i * 70}ms` }}
+                    >
+                      <div className="service-name">
+                        <span>
+                          {mine.has(service) && (
+                            <span className="mine-mark" title="One of your services">★ </span>
+                          )}
+                          {service}
+                        </span>
+                        <span className="service-count">{codes.length}</span>
+                      </div>
+                      <div className="countries">
+                        {codes.map(({ code, url }) =>
+                          url ? (
+                            <a
+                              key={code}
+                              className="country"
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={`${COUNTRY_NAME.get(code)} — open on ${service}`}
+                            >
+                              {flag(code)} {code}
+                            </a>
+                          ) : (
+                            <span key={code} className="country" title={COUNTRY_NAME.get(code)}>
+                              {flag(code)} {code}
+                            </span>
+                          ),
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </>
             ))}
         </section>
       )}
