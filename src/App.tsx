@@ -158,18 +158,41 @@ export default function App() {
     .filter(([, offers]) => offers.some((o) => o.code === home))
     .map(([s]) => s);
   const mineAtHome = servicesAtHome.filter((s) => mine.has(s));
+  const mineAvailable = services.filter(([s]) => mine.has(s));
+  const mineCountries = [
+    ...new Set(mineAvailable.flatMap(([, offers]) => offers.map((o) => o.code))),
+  ];
 
-  // "No VPN needed" only holds if it's on a service you actually have.
-  function homeNote(): string {
-    if (!servicesAtHome.length) return `Not streaming in ${homeName} — you'll need a VPN.`;
-    if (mineAtHome.length) {
-      return `No VPN needed — streaming in ${homeName} on ${mineAtHome.join(', ')}.`;
+  // Each case should tell you what to do next, not just what's true.
+  function homeNote(): { text: string; tone: 'ok' | 'vpn' | '' } {
+    if (!myServices.length) {
+      return servicesAtHome.length
+        ? {
+            text: `Streaming in ${homeName} on ${servicesAtHome.join(', ')}. Star the services you have to see whether you need a VPN.`,
+            tone: '',
+          }
+        : { text: `Not streaming in ${homeName} — you'll need a VPN.`, tone: 'vpn' };
     }
-    const where = `Streaming in ${homeName} on ${servicesAtHome.join(', ')}`;
-    return myServices.length
-      ? `${where}, but not on any of your services.`
-      : `${where}. Star the services you have to see whether you need a VPN.`;
+    if (mineAtHome.length) {
+      return { text: `No VPN needed — watch it on ${mineAtHome.join(', ')}.`, tone: 'ok' };
+    }
+    if (mineCountries.length) {
+      const names = mineCountries.slice(0, 3).map((c) => COUNTRY_NAME.get(c));
+      const more = mineCountries.length - names.length;
+      const where = more ? `${names.join(', ')} or ${more} more` : names.join(' or ');
+      return {
+        text: `VPN needed — set it to ${where} to watch on ${mineAvailable.map(([s]) => s).join(', ')}.`,
+        tone: 'vpn',
+      };
+    }
+    return servicesAtHome.length
+      ? {
+          text: `Not on any of your services anywhere. In ${homeName} it's on ${servicesAtHome.join(', ')}, if you want to subscribe.`,
+          tone: '',
+        }
+      : { text: `Not on any of your services anywhere, and not streaming in ${homeName}.`, tone: '' };
   }
+  const note = homeName ? homeNote() : null;
 
   return (
     <div className="board">
@@ -249,12 +272,12 @@ export default function App() {
               </p>
             ) : (
               <>
-                {homeName && (
-                  <p className={mineAtHome.length ? 'here-note ok' : 'here-note'}>
-                    {flag(home)} {homeNote()}
+                {note && (
+                  <p className={`here-note ${note.tone}`}>
+                    {flag(home)} {note.text}
                   </p>
                 )}
-                {myServices.length > 0 && !onMine && (
+                {!note && myServices.length > 0 && !onMine && (
                   <p className="status">Not on any of your services — other options below.</p>
                 )}
                 <ol className="services">

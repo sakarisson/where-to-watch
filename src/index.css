@@ -457,6 +457,12 @@ a.country {
   color: #9be3a3;
 }
 
+.here-note.vpn {
+  border-color: var(--amber-dim);
+  background: rgba(255, 181, 46, 0.08);
+  color: var(--amber);
+}
+
 .country.here {
   border-color: #6fcf7a;
   background: rgba(111, 207, 122, 0.15);
